@@ -6,6 +6,9 @@ const { Server } = require('socket.io');
 const connectDB = require('./config/db');
 const cookieParser = require('cookie-parser');
 const authRoutes = require('./routes/authRoutes');
+const socketAuthMiddleware = require('./sockets/authSocket');
+const User = require('./models/User');
+
 
 const app = express();
 app.use(cors({ origin: process.env.CLIENT_URL,credentials: true, }));
@@ -19,10 +22,15 @@ const server = http.createServer(app);
 const io = new Server(server, {
   cors: { origin: process.env.CLIENT_URL, credentials: true },
 });
+io.use(socketAuthMiddleware);
 
-io.on('connection', (socket) => {
-  console.log('Socket connected:', socket.id);
-  socket.on('disconnect', () => console.log('Socket disconnected:', socket.id));
+io.on('connection', async (socket) => {
+  const user = await User.findById(socket.userId).select('username email');
+  console.log(`Socket connected: ${socket.id} — user: ${user?.username} (${socket.userId})`);
+
+  socket.on('disconnect', () => {
+    console.log(`Socket disconnected: ${socket.id} — user: ${user?.username}`);
+  });
 });
 
 const PORT = process.env.PORT || 5000;

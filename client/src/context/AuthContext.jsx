@@ -1,5 +1,7 @@
 import { createContext, useContext, useState, useEffect } from 'react';
 import api from '../api/axios';
+import { socket } from '../socket';
+
 
 const AuthContext = createContext();
 
@@ -11,6 +13,7 @@ export const AuthProvider = ({ children }) => {
     try {
       const res = await api.get('/api/auth/me');
       setUser(res.data.user);
+      socket.connect();
     } catch {
       setUser(null);
     } finally {
@@ -30,11 +33,13 @@ export const AuthProvider = ({ children }) => {
   const login = async (email, password) => {
     const res = await api.post('/api/auth/login', { email, password });
     setUser(res.data.user);
+    socket.connect();
   };
 
   const logout = async () => {
     await api.post('/api/auth/logout');
     setUser(null);
+    socket.disconnect();
   };
 
   return (
