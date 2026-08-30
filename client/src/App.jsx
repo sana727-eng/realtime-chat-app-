@@ -3,6 +3,7 @@ import { useAuth } from './context/AuthContext';
 import { useSocketStatus } from './hooks/useSocketStatus';
 import Login from './pages/Login';
 import Register from './pages/Register';
+import Rooms from './pages/Rooms';
 
 function App() {
   const { user, loading, logout } = useAuth();
