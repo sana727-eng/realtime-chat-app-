@@ -11,6 +11,7 @@ const User = require('./models/User');
 const roomRoutes = require('./routes/roomRoutes');
 const registerRoomHandlers = require('./sockets/roomSocket');
 const registerMessageHandlers = require('./sockets/messageSocket');
+const messageRoutes = require('./routes/messageRoutes');
 
 
 const app = express();
@@ -19,6 +20,7 @@ app.use(express.json());
 app.use(cookieParser());
 app.use('/api/auth', authRoutes);
 app.use('/api/rooms', roomRoutes);
+app.use('/api/messages', messageRoutes);
 
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
 

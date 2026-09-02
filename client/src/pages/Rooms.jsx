@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { fetchRooms, createRoomApi } from '../api/rooms';
+import { fetchRoomMessages } from '../api/messages';
 import { socket } from '../socket';
 import { useAuth } from '../context/AuthContext';
+
 
 function Rooms() {
   const [rooms, setRooms] = useState([]);
@@ -22,17 +24,16 @@ function Rooms() {
 
   // listen for incoming messages once, for the lifetime of the component
   useEffect(() => {
-    const handleReceive = (message) => {
-      // only show messages for the room currently open
-      setMessages((prev) => [...prev, message]);
-    };
+  const handleReceive = (message) => {
+    setMessages((prev) => {
+      if (prev.some((m) => m._id === message._id)) return prev; // already have it
+      return [...prev, message];
+    });
+  };
 
-    socket.on('message:receive', handleReceive);
-
-    return () => {
-      socket.off('message:receive', handleReceive);
-    };
-  }, []);
+  socket.on('message:receive', handleReceive);
+  return () => socket.off('message:receive', handleReceive);
+}, []);
 
   const handleCreate = async (e) => {
     e.preventDefault();
@@ -41,14 +42,22 @@ function Rooms() {
     loadRooms();
   };
 
-  const handleJoin = (roomId) => {
-    if (activeRoomId) {
-      socket.emit('room:leave', activeRoomId);
-    }
-    socket.emit('room:join', roomId);
-    setActiveRoomId(roomId);
-    setMessages([]); // clear old room's messages from view
-  };
+  const handleJoin = async (roomId) => {
+  if (activeRoomId) {
+    socket.emit('room:leave', activeRoomId);
+  }
+  socket.emit('room:join', roomId);
+  setActiveRoomId(roomId);
+
+  // load history instead of just clearing to empty
+  try {
+    const res = await fetchRoomMessages(roomId);
+    setMessages(res.data.messages);
+  } catch (err) {
+    console.error('Failed to load message history', err);
+    setMessages([]);
+  }
+};
 
   const handleSendMessage = (e) => {
     e.preventDefault();
