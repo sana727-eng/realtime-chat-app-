@@ -16,7 +16,9 @@ exports.createRoom = async (req, res) => {
   try {
     const { name } = req.body;
     if (!name) return res.status(400).json({ message: 'Room name is required' });
-
+    if (name.trim().length < 1 || name.trim().length > 50) {
+      return res.status(400).json({ message: 'Room name must be 1-50 characters' });
+}
     const room = await Room.create({
       name,
       createdBy: req.userId,
