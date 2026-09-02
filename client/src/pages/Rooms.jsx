@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { fetchRooms, createRoomApi } from '../api/rooms';
 import { fetchRoomMessages } from '../api/messages';
 import { fetchOnlineUsers } from '../api/presence';
@@ -12,7 +12,11 @@ function Rooms() {
   const [messages, setMessages] = useState([]);
   const [messageInput, setMessageInput] = useState('');
   const [onlineUserIds, setOnlineUserIds] = useState(new Set());
+  const [typingUsers, setTypingUsers] = useState(new Set());
   const { user } = useAuth();
+
+  const typingTimeoutRef = useRef(null);
+  const isTypingRef = useRef(false);
 
   const loadRooms = async () => {
     const res = await fetchRooms();
@@ -73,6 +77,31 @@ function Rooms() {
     };
   }, []);
 
+  // typing indicator listeners, scoped to the currently active room
+  useEffect(() => {
+    const handleUserStarted = ({ userId, roomId }) => {
+      if (roomId !== activeRoomId) return;
+      setTypingUsers((prev) => new Set(prev).add(userId));
+    };
+
+    const handleUserStopped = ({ userId, roomId }) => {
+      if (roomId !== activeRoomId) return;
+      setTypingUsers((prev) => {
+        const next = new Set(prev);
+        next.delete(userId);
+        return next;
+      });
+    };
+
+    socket.on('typing:userStarted', handleUserStarted);
+    socket.on('typing:userStopped', handleUserStopped);
+
+    return () => {
+      socket.off('typing:userStarted', handleUserStarted);
+      socket.off('typing:userStopped', handleUserStopped);
+    };
+  }, [activeRoomId]);
+
   // re-join the active room automatically if the socket reconnects
   useEffect(() => {
     const handleReconnect = () => {
@@ -102,6 +131,7 @@ function Rooms() {
 
     socket.emit('room:join', roomId);
     setActiveRoomId(roomId);
+    setTypingUsers(new Set()); // clear stale typing indicators from the previous room
 
     try {
       const res = await fetchRoomMessages(roomId);
@@ -112,11 +142,45 @@ function Rooms() {
     }
   };
 
+  const handleInputChange = (e) => {
+    setMessageInput(e.target.value);
+
+    if (!activeRoomId) return;
+
+    if (!isTypingRef.current) {
+      isTypingRef.current = true;
+      socket.emit('typing:start', { roomId: activeRoomId });
+    }
+
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
+
+    typingTimeoutRef.current = setTimeout(() => {
+      isTypingRef.current = false;
+      socket.emit('typing:stop', { roomId: activeRoomId });
+    }, 2000);
+  };
+
   const handleSendMessage = (e) => {
     e.preventDefault();
     if (!messageInput.trim() || !activeRoomId) return;
+
     socket.emit('message:send', { roomId: activeRoomId, content: messageInput.trim() });
     setMessageInput('');
+
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    isTypingRef.current = false;
+    socket.emit('typing:stop', { roomId: activeRoomId });
+  };
+
+  const getTypingLabel = () => {
+    if (typingUsers.size === 0) return null;
+    const names = Array.from(typingUsers).map((uid) => {
+      const found = messages.find((m) => m.senderId === uid);
+      return found ? found.senderUsername : 'Someone';
+    });
+    return `${names.join(', ')} ${names.length === 1 ? 'is' : 'are'} typing...`;
   };
 
   return (
@@ -174,10 +238,17 @@ function Rooms() {
               ))
             )}
           </div>
+
+          {getTypingLabel() && (
+            <p style={{ color: '#888', fontStyle: 'italic', fontSize: 14, margin: '4px 0' }}>
+              {getTypingLabel()}
+            </p>
+          )}
+
           <form onSubmit={handleSendMessage} style={{ display: 'flex', gap: 8 }}>
             <input
               value={messageInput}
-              onChange={(e) => setMessageInput(e.target.value)}
+              onChange={handleInputChange}
               placeholder="Type a message..."
               maxLength={2000}
               style={{ flex: 1 }}

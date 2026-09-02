@@ -11,6 +11,8 @@ const socketAuthMiddleware = require('./sockets/authSocket');
 const registerRoomHandlers = require('./sockets/roomSocket');
 const registerMessageHandlers = require('./sockets/messageSocket');
 const { addUserSocket, removeUserSocket, getOnlineUserIds } = require('./sockets/presence');
+const registerTypingHandlers = require('./sockets/typingSocket');
+
 
 const User = require('./models/User');
 
@@ -56,6 +58,7 @@ io.on('connection', async (socket) => {
 
   registerRoomHandlers(io, socket);
   registerMessageHandlers(io, socket);
+  registerTypingHandlers(io, socket);
 
   socket.on('disconnect', () => {
     console.log(`Socket disconnected: ${socket.id} — user: ${user?.username}`);
