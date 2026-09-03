@@ -25,34 +25,7 @@ function App() {
     );
   }
 
-  return (
-    <div style={{ maxWidth: 700, margin: '2rem auto', fontFamily: 'sans-serif' }}>
-      <header style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: '1.5rem',
-      }}>
-        <div>
-          <strong>Logged in as:</strong> {user.username}
-        </div>
-        <div>
-          <span style={{
-            display: 'inline-block',
-            width: 10,
-            height: 10,
-            borderRadius: '50%',
-            backgroundColor: connected ? '#22c55e' : '#ef4444',
-            marginRight: 6,
-          }} />
-          {connected ? 'Socket connected' : 'Socket disconnected'}
-        </div>
-        <button onClick={logout}>Logout</button>
-      </header>
-
-      <Rooms />
-    </div>
-  );
+  return <Rooms connected={connected} logout={logout} user={user} />;
 }
 
 export default App;

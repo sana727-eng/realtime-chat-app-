@@ -5,7 +5,7 @@ import { fetchOnlineUsers } from '../api/presence';
 import { socket } from '../socket';
 import { useAuth } from '../context/AuthContext';
 
-function Rooms() {
+function Rooms({ connected, user, logout }) {
   const [rooms, setRooms] = useState([]);
   const [newRoomName, setNewRoomName] = useState('');
   const [activeRoomId, setActiveRoomId] = useState(null);
@@ -13,7 +13,7 @@ function Rooms() {
   const [messageInput, setMessageInput] = useState('');
   const [onlineUserIds, setOnlineUserIds] = useState(new Set());
   const [typingUsers, setTypingUsers] = useState(new Set());
-  const { user } = useAuth();
+  
 
   const typingTimeoutRef = useRef(null);
   const isTypingRef = useRef(false);
@@ -29,30 +29,32 @@ function Rooms() {
 
   // load initial presence snapshot + listen for live presence changes
   useEffect(() => {
-    fetchOnlineUsers().then((res) => {
-      setOnlineUserIds(new Set(res.data.onlineUserIds));
+  fetchOnlineUsers().then((res) => {
+    const ids = new Set(res.data.onlineUserIds);
+    ids.add(user.id); // you are always online in your own view
+    setOnlineUserIds(ids);
+  });
+
+  const handleOnline = ({ userId }) => {
+    setOnlineUserIds((prev) => new Set(prev).add(userId));
+  };
+
+  const handleOffline = ({ userId }) => {
+    setOnlineUserIds((prev) => {
+      const next = new Set(prev);
+      next.delete(userId);
+      return next;
     });
+  };
 
-    const handleOnline = ({ userId }) => {
-      setOnlineUserIds((prev) => new Set(prev).add(userId));
-    };
+  socket.on('presence:online', handleOnline);
+  socket.on('presence:offline', handleOffline);
 
-    const handleOffline = ({ userId }) => {
-      setOnlineUserIds((prev) => {
-        const next = new Set(prev);
-        next.delete(userId);
-        return next;
-      });
-    };
-
-    socket.on('presence:online', handleOnline);
-    socket.on('presence:offline', handleOffline);
-
-    return () => {
-      socket.off('presence:online', handleOnline);
-      socket.off('presence:offline', handleOffline);
-    };
-  }, []);
+  return () => {
+    socket.off('presence:online', handleOnline);
+    socket.off('presence:offline', handleOffline);
+  };
+}, [user.id]);
 
   // listen for incoming live messages, with a duplicate guard
   useEffect(() => {
@@ -123,15 +125,16 @@ function Rooms() {
   };
 
   const handleJoin = async (roomId) => {
-    if (activeRoomId === roomId) return; // already in this room, no-op
+    if (activeRoomId === roomId) return;
 
     if (activeRoomId) {
       socket.emit('room:leave', activeRoomId);
+      socket.emit('typing:stop', { roomId: activeRoomId }); 
     }
 
     socket.emit('room:join', roomId);
     setActiveRoomId(roomId);
-    setTypingUsers(new Set()); // clear stale typing indicators from the previous room
+    setTypingUsers(new Set()); 
 
     try {
       const res = await fetchRoomMessages(roomId);
@@ -184,80 +187,101 @@ function Rooms() {
   };
 
   return (
-    <div>
-      <form onSubmit={handleCreate} style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+  <div className="app-layout">
+    <aside className="sidebar">
+      <div className="sidebar-header">
+        <div className="sidebar-user">
+          <span className={`status-dot ${connected ? 'online' : 'offline'}`} />
+          {user.username}
+        </div>
+        <button onClick={logout} style={{ padding: '4px 10px', fontSize: 13 }}>
+          Logout
+        </button>
+      </div>
+
+      <div className="room-list">
+        {rooms.length === 0 ? (
+          <p className="empty-state">No rooms yet.</p>
+        ) : (
+          rooms.map((room) => (
+            <div
+              key={room._id}
+              className={`room-item ${activeRoomId === room._id ? 'active' : ''}`}
+              onClick={() => handleJoin(room._id)}
+            >
+              <span>{room.name}</span>
+              {activeRoomId === room._id && (
+                <span style={{ fontSize: 12, color: '#22c55e' }}>●</span>
+              )}
+            </div>
+          ))
+        )}
+      </div>
+
+      <form onSubmit={handleCreate} className="create-room-form">
         <input
           value={newRoomName}
           onChange={(e) => setNewRoomName(e.target.value)}
           placeholder="Room name"
           maxLength={50}
+          type="text"
+          style={{ flex: 1 }}
           required
         />
-        <button type="submit">Create Room</button>
+        <button type="submit">+</button>
       </form>
+    </aside>
 
-      {rooms.length === 0 ? (
-        <p style={{ color: '#888' }}>No rooms yet — create one to get started.</p>
+    <main className="main-panel">
+      {!activeRoomId ? (
+        <div className="empty-state" style={{ margin: 'auto' }}>
+          Select a room to start chatting.
+        </div>
       ) : (
-        <ul style={{ listStyle: 'none', padding: 0 }}>
-          {rooms.map((room) => (
-            <li
-              key={room._id}
-              style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}
-            >
-              <span>{room.name}</span>
-              <button onClick={() => handleJoin(room._id)}>
-                {activeRoomId === room._id ? 'Joined' : 'Join'}
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
+        <>
+          <div className="chat-header">
+            {rooms.find((r) => r._id === activeRoomId)?.name}
+          </div>
 
-      {activeRoomId && (
-        <div style={{ border: '1px solid #444', padding: 12, marginTop: 16 }}>
-          <div style={{ height: 200, overflowY: 'auto', marginBottom: 8 }}>
+          <div className="message-list">
             {messages.length === 0 ? (
-              <p style={{ color: '#888' }}>No messages yet — say hello.</p>
+              <p className="empty-state">No messages yet — say hello.</p>
             ) : (
               messages.map((msg) => (
                 <div key={msg._id}>
                   <span
-                    style={{
-                      display: 'inline-block',
-                      width: 8,
-                      height: 8,
-                      borderRadius: '50%',
-                      backgroundColor: onlineUserIds.has(msg.senderId) ? '#22c55e' : '#666',
-                      marginRight: 6,
-                    }}
+                    className={`status-dot ${
+                      onlineUserIds.has(msg.senderId) ? 'online' : 'offline'
+                    }`}
+                    style={{ marginRight: 6 }}
                   />
                   <strong>{msg.senderId === user.id ? 'You' : msg.senderUsername}:</strong>{' '}
                   {msg.content}
                 </div>
               ))
             )}
+            {getTypingLabel() && (
+              <p style={{ color: '#888', fontStyle: 'italic', fontSize: 14 }}>
+                {getTypingLabel()}
+              </p>
+            )}
           </div>
 
-          {getTypingLabel() && (
-            <p style={{ color: '#888', fontStyle: 'italic', fontSize: 14, margin: '4px 0' }}>
-              {getTypingLabel()}
-            </p>
-          )}
-
-          <form onSubmit={handleSendMessage} style={{ display: 'flex', gap: 8 }}>
+          <form onSubmit={handleSendMessage} className="message-input-form">
             <input
               value={messageInput}
               onChange={handleInputChange}
               placeholder="Type a message..."
               maxLength={2000}
+              type="text"
               style={{ flex: 1 }}
             />
             <button type="submit">Send</button>
           </form>
-        </div>
+        </>
       )}
-    </div>
+    </main>
+  </div>
   );
 }
 
