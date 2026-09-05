@@ -1,12 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
-import { fetchRooms, createRoomApi } from '../api/rooms';
+import {
+  fetchRooms,
+  createRoomApi,
+  fetchAllUsers,
+  getOrCreateDMApi,
+} from '../api/rooms';
 import { fetchRoomMessages } from '../api/messages';
 import { fetchOnlineUsers } from '../api/presence';
 import { socket } from '../socket';
-import { useAuth } from '../context/AuthContext';
 import { formatMessageTime } from '../utils/formatTime';
 import Spinner from '../components/Spinner';
-
 
 function Rooms({ connected, user, logout }) {
   const [rooms, setRooms] = useState([]);
@@ -18,12 +21,12 @@ function Rooms({ connected, user, logout }) {
   const [typingUsers, setTypingUsers] = useState(new Set());
   const [messagesLoading, setMessagesLoading] = useState(false);
   const [sendError, setSendError] = useState('');
-
+  const [allUsers, setAllUsers] = useState([]);
+  const [showUserList, setShowUserList] = useState(false);
 
   const typingTimeoutRef = useRef(null);
   const isTypingRef = useRef(false);
   const messageListRef = useRef(null);
-
 
   const loadRooms = async () => {
     const res = await fetchRooms();
@@ -32,6 +35,11 @@ function Rooms({ connected, user, logout }) {
 
   useEffect(() => {
     loadRooms();
+  }, []);
+
+  // list of users available to start a DM with
+  useEffect(() => {
+    fetchAllUsers().then((res) => setAllUsers(res.data.users));
   }, []);
 
   // load initial presence snapshot + listen for live presence changes
@@ -123,6 +131,25 @@ function Rooms({ connected, user, logout }) {
     return () => socket.off('reconnect', handleReconnect);
   }, [activeRoomId]);
 
+  // smart auto-scroll: only snap to bottom if already near it
+  useEffect(() => {
+    const container = messageListRef.current;
+    if (!container) return;
+
+    const isNearBottom =
+      container.scrollHeight - container.scrollTop - container.clientHeight < 100;
+
+    if (isNearBottom) {
+      container.scrollTop = container.scrollHeight;
+    }
+  }, [messages]);
+
+  // force scroll to bottom when switching rooms
+  useEffect(() => {
+    if (messageListRef.current) {
+      messageListRef.current.scrollTop = messageListRef.current.scrollHeight;
+    }
+  }, [activeRoomId]);
 
   const handleCreate = async (e) => {
     e.preventDefault();
@@ -154,7 +181,13 @@ function Rooms({ connected, user, logout }) {
     } finally {
       setMessagesLoading(false);
     }
+  };
 
+  const handleStartDM = async (otherUserId) => {
+    const res = await getOrCreateDMApi(otherUserId);
+    await loadRooms(); // refresh room list so the new/existing DM shows up
+    handleJoin(res.data.room._id);
+    setShowUserList(false);
   };
 
   const handleInputChange = (e) => {
@@ -197,31 +230,26 @@ function Rooms({ connected, user, logout }) {
     });
     return `${names.join(', ')} ${names.length === 1 ? 'is' : 'are'} typing...`;
   };
-  useEffect(() => {
-    const container = messageListRef.current;
-    if (!container) return;
 
-    // only auto-scroll if the user is already near the bottom (within 100px)
-    const isNearBottom =
-      container.scrollHeight - container.scrollTop - container.clientHeight < 100;
+  // for DMs, always show the OTHER participant's name, not a fixed stored name
+  const getDMDisplayName = (room) => {
+    if (!room.isDM) return room.name;
+    const other = room.members?.find((m) => (m._id || m) !== user.id);
+    return other?.username || room.name;
+  };
 
-    if (isNearBottom) {
-      container.scrollTop = container.scrollHeight;
-    }
-  }, [messages]);
-
-  useEffect(() => {
-    if (messageListRef.current) {
-      messageListRef.current.scrollTop = messageListRef.current.scrollHeight;
-    }
-  }, [activeRoomId]);
+  const groupRooms = rooms.filter((r) => !r.isDM);
+  const dmRooms = rooms.filter((r) => r.isDM);
+  const activeRoom = rooms.find((r) => r._id === activeRoomId);
 
   return (
-    <div className="app-layout"> {!connected && (
-      <div className="disconnect-banner">
-        Connection lost — trying to reconnect...
-      </div>
-    )}
+    <div className="app-layout">
+      {!connected && (
+        <div className="disconnect-banner">
+          Connection lost — trying to reconnect...
+        </div>
+      )}
+
       <aside className="sidebar">
         <div className="sidebar-header">
           <div className="sidebar-user">
@@ -234,22 +262,47 @@ function Rooms({ connected, user, logout }) {
         </div>
 
         <div className="room-list">
-          {rooms.length === 0 ? (
-            <p className="empty-state">No rooms yet.</p>
-          ) : (
-            rooms.map((room) => (
-              <div
-                key={room._id}
-                className={`room-item ${activeRoomId === room._id ? 'active' : ''}`}
-                onClick={() => handleJoin(room._id)}
-              >
-                <span>{room.name}</span>
-                {activeRoomId === room._id && (
-                  <span style={{ fontSize: 12, color: '#22c55e' }}>●</span>
-                )}
-              </div>
-            ))
+          {groupRooms.length > 0 && (
+            <>
+              <p style={{ fontSize: 11, color: '#666', padding: '4px 12px', textTransform: 'uppercase' }}>
+                Rooms
+              </p>
+              {groupRooms.map((room) => (
+                <div
+                  key={room._id}
+                  className={`room-item ${activeRoomId === room._id ? 'active' : ''}`}
+                  onClick={() => handleJoin(room._id)}
+                >
+                  <span>{room.name}</span>
+                  {activeRoomId === room._id && (
+                    <span style={{ fontSize: 12, color: '#22c55e' }}>●</span>
+                  )}
+                </div>
+              ))}
+            </>
           )}
+
+          {dmRooms.length > 0 && (
+            <>
+              <p style={{ fontSize: 11, color: '#666', padding: '4px 12px', textTransform: 'uppercase', marginTop: 8 }}>
+                Direct Messages
+              </p>
+              {dmRooms.map((room) => (
+                <div
+                  key={room._id}
+                  className={`room-item ${activeRoomId === room._id ? 'active' : ''}`}
+                  onClick={() => handleJoin(room._id)}
+                >
+                  <span>{getDMDisplayName(room)}</span>
+                  {activeRoomId === room._id && (
+                    <span style={{ fontSize: 12, color: '#22c55e' }}>●</span>
+                  )}
+                </div>
+              ))}
+            </>
+          )}
+
+          {rooms.length === 0 && <p className="empty-state">No rooms yet.</p>}
         </div>
 
         <form onSubmit={handleCreate} className="create-room-form">
@@ -264,6 +317,25 @@ function Rooms({ connected, user, logout }) {
           />
           <button type="submit">+</button>
         </form>
+
+        <div style={{ padding: 12, borderTop: '1px solid #2a2a2a' }}>
+          <button onClick={() => setShowUserList(!showUserList)} style={{ width: '100%' }}>
+            {showUserList ? 'Close' : '+ New Direct Message'}
+          </button>
+          {showUserList && (
+            <div style={{ marginTop: 8, maxHeight: 150, overflowY: 'auto' }}>
+              {allUsers.map((u) => (
+                <div key={u._id} className="room-item" onClick={() => handleStartDM(u._id)}>
+                  <span
+                    className={`status-dot ${onlineUserIds.has(u._id) ? 'online' : 'offline'}`}
+                    style={{ marginRight: 6 }}
+                  />
+                  {u.username}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </aside>
 
       <main className="main-panel">
@@ -274,7 +346,7 @@ function Rooms({ connected, user, logout }) {
         ) : (
           <>
             <div className="chat-header">
-              {rooms.find((r) => r._id === activeRoomId)?.name}
+              {activeRoom ? getDMDisplayName(activeRoom) : ''}
             </div>
 
             <div className="message-list" ref={messageListRef}>
@@ -288,7 +360,6 @@ function Rooms({ connected, user, logout }) {
                 messages.map((msg, index) => {
                   const isOwn = msg.senderId === user.id;
                   const prevMsg = messages[index - 1];
-                  // only show the sender's name/avatar if it's a different sender than the previous message
                   const showMeta = !prevMsg || prevMsg.senderId !== msg.senderId;
 
                   return (
@@ -302,11 +373,19 @@ function Rooms({ connected, user, logout }) {
                           )}
                         </div>
                       )}
-                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: isOwn ? 'flex-end' : 'flex-start' }}>
+                      <div
+                        style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: isOwn ? 'flex-end' : 'flex-start',
+                        }}
+                      >
                         {showMeta && !isOwn && (
                           <div className="message-meta">
                             <span
-                              className={`status-dot ${onlineUserIds.has(msg.senderId) ? 'online' : 'offline'}`}
+                              className={`status-dot ${
+                                onlineUserIds.has(msg.senderId) ? 'online' : 'offline'
+                              }`}
                             />
                             {msg.senderUsername}
                           </div>
@@ -326,11 +405,20 @@ function Rooms({ connected, user, logout }) {
                 </p>
               )}
               {sendError && (
-                <p style={{ color: '#fecaca', backgroundColor: '#7f1d1d', padding: '6px 12px', fontSize: 13, margin: 0 }}>
+                <p
+                  style={{
+                    color: '#fecaca',
+                    backgroundColor: '#7f1d1d',
+                    padding: '6px 12px',
+                    fontSize: 13,
+                    margin: 0,
+                  }}
+                >
                   {sendError}
                 </p>
               )}
             </div>
+
             <form onSubmit={handleSendMessage} className="message-input-form">
               <input
                 value={messageInput}
