@@ -24,6 +24,12 @@ const isRateLimited = (userId) => {
 const registerMessageHandlers = (io, socket) => {
   socket.on('message:send', async ({ roomId, content }) => {
   if (!roomId || !content?.trim()) return;
+
+  if (isRateLimited(socket.userId)) {
+    socket.emit('message:error', 'You are sending messages too fast. Please slow down.');
+    return;
+  }
+  
   if (content.length > 2000) {
     socket.emit('message:error', 'Message too long (max 2000 characters)');
     return;
@@ -56,6 +62,23 @@ const registerMessageHandlers = (io, socket) => {
       socket.emit('message:error', 'Failed to send message');
     }
   });
+  socket.on('message:markRead', async ({ messageId, roomId }) => {
+    try {
+      const message = await Message.findByIdAndUpdate(
+        messageId,
+        { $addToSet: { readBy: socket.userId } },
+        { new: true }
+      );
+      if (!message) return;
+
+      io.to(roomId).emit('message:readUpdate', {
+        messageId,
+        readBy: message.readBy,
+      });
+    } catch (err) {
+      console.error('Failed to mark message as read:', err.message);
+    }
+  })
 };
 
 module.exports = registerMessageHandlers;

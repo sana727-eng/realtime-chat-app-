@@ -37,16 +37,14 @@ function Rooms({ connected, user, logout }) {
     loadRooms();
   }, []);
 
-  // list of users available to start a DM with
   useEffect(() => {
     fetchAllUsers().then((res) => setAllUsers(res.data.users));
   }, []);
 
-  // load initial presence snapshot + listen for live presence changes
   useEffect(() => {
     fetchOnlineUsers().then((res) => {
       const ids = new Set(res.data.onlineUserIds);
-      ids.add(user.id); // you are always online in your own view
+      ids.add(user.id);
       setOnlineUserIds(ids);
     });
 
@@ -71,18 +69,21 @@ function Rooms({ connected, user, logout }) {
     };
   }, [user.id]);
 
-  // listen for incoming live messages, with a duplicate guard
   useEffect(() => {
     const handleReceive = (message) => {
       setMessages((prev) => {
-        if (prev.some((m) => m._id === message._id)) return prev; // already have it
+        if (prev.some((m) => m._id === message._id)) return prev;
         return [...prev, message];
       });
+
+      if (message.roomId === activeRoomId && message.senderId !== user.id) {
+        socket.emit('message:markRead', { messageId: message._id, roomId: message.roomId });
+      }
     };
 
     const handleMessageError = (errMsg) => {
       setSendError(errMsg);
-      setTimeout(() => setSendError(''), 4000); // auto-clear after a few seconds
+      setTimeout(() => setSendError(''), 4000);
     };
 
     socket.on('message:receive', handleReceive);
@@ -92,9 +93,19 @@ function Rooms({ connected, user, logout }) {
       socket.off('message:receive', handleReceive);
       socket.off('message:error', handleMessageError);
     };
+  }, [activeRoomId, user.id]);
+
+  useEffect(() => {
+    const handleReadUpdate = ({ messageId, readBy }) => {
+      setMessages((prev) =>
+        prev.map((m) => (m._id === messageId ? { ...m, readBy } : m))
+      );
+    };
+
+    socket.on('message:readUpdate', handleReadUpdate);
+    return () => socket.off('message:readUpdate', handleReadUpdate);
   }, []);
 
-  // typing indicator listeners, scoped to the currently active room
   useEffect(() => {
     const handleUserStarted = ({ userId, roomId }) => {
       if (roomId !== activeRoomId) return;
@@ -119,7 +130,6 @@ function Rooms({ connected, user, logout }) {
     };
   }, [activeRoomId]);
 
-  // re-join the active room automatically if the socket reconnects
   useEffect(() => {
     const handleReconnect = () => {
       if (activeRoomId) {
@@ -131,7 +141,6 @@ function Rooms({ connected, user, logout }) {
     return () => socket.off('reconnect', handleReconnect);
   }, [activeRoomId]);
 
-  // smart auto-scroll: only snap to bottom if already near it
   useEffect(() => {
     const container = messageListRef.current;
     if (!container) return;
@@ -144,7 +153,6 @@ function Rooms({ connected, user, logout }) {
     }
   }, [messages]);
 
-  // force scroll to bottom when switching rooms
   useEffect(() => {
     if (messageListRef.current) {
       messageListRef.current.scrollTop = messageListRef.current.scrollHeight;
@@ -185,7 +193,7 @@ function Rooms({ connected, user, logout }) {
 
   const handleStartDM = async (otherUserId) => {
     const res = await getOrCreateDMApi(otherUserId);
-    await loadRooms(); // refresh room list so the new/existing DM shows up
+    await loadRooms();
     handleJoin(res.data.room._id);
     setShowUserList(false);
   };
@@ -231,7 +239,6 @@ function Rooms({ connected, user, logout }) {
     return `${names.join(', ')} ${names.length === 1 ? 'is' : 'are'} typing...`;
   };
 
-  // for DMs, always show the OTHER participant's name, not a fixed stored name
   const getDMDisplayName = (room) => {
     if (!room.isDM) return room.name;
     const other = room.members?.find((m) => (m._id || m) !== user.id);
@@ -241,6 +248,11 @@ function Rooms({ connected, user, logout }) {
   const groupRooms = rooms.filter((r) => !r.isDM);
   const dmRooms = rooms.filter((r) => r.isDM);
   const activeRoom = rooms.find((r) => r._id === activeRoomId);
+
+  const lastOwnMessageIndex = messages.reduce(
+    (lastIdx, m, idx) => (m.senderId === user.id ? idx : lastIdx),
+    -1
+  );
 
   return (
     <div className="app-layout">
@@ -361,6 +373,10 @@ function Rooms({ connected, user, logout }) {
                   const isOwn = msg.senderId === user.id;
                   const prevMsg = messages[index - 1];
                   const showMeta = !prevMsg || prevMsg.senderId !== msg.senderId;
+                  const showSeen =
+                    isOwn &&
+                    index === lastOwnMessageIndex &&
+                    msg.readBy?.some((id) => id !== user.id);
 
                   return (
                     <div key={msg._id} className={`message-row ${isOwn ? 'own' : 'other'}`}>
@@ -394,6 +410,9 @@ function Rooms({ connected, user, logout }) {
                           {msg.content}
                         </div>
                         <div className="message-timestamp">{formatMessageTime(msg.createdAt)}</div>
+                        {showSeen && (
+                          <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>Seen</div>
+                        )}
                       </div>
                     </div>
                   );
