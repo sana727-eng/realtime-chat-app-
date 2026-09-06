@@ -7,21 +7,24 @@ function Register() {
   const [username, setUsername] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const { Register } = useAuth();
+  const { register } = useAuth();
 
   const handleSubmit = async (e) => {
-    e.preventDefault();
-    setError('');
-    try {
-      await Register(email, password,username);
-    } catch (err) {
-      setError(err.response?.data?.message || 'Registration failed');
-    }
-  };
+  e.preventDefault();
+  setError('');
+  setSubmitting(true);
+  try {
+    await register(username, email, password);
+  } catch (err) {
+    setError(err.response?.data?.message || 'Registration failed');
+  } finally {
+    setSubmitting(false);
+  }
+};
 
   return (
     <form onSubmit={handleSubmit}>
-      <h2>Login</h2>
+      <h2>Register</h2>
       {error && (
         <p style={{ color: '#fecaca', backgroundColor: '#7f1d1d', padding: '8px 12px', borderRadius: 6, fontSize: 13 }}>
           {error}
@@ -52,7 +55,7 @@ function Register() {
         required
       />
       <button type="submit" disabled={submitting}>
-        {submitting ? 'Logging in...' : 'Login'}
+        {submitting ? 'Registering in...' : 'Register'}
       </button>
     </form>
   );

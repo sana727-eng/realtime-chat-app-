@@ -21,7 +21,6 @@ const roomSchema = new mongoose.Schema({
   },
   dmKey: {
     type: String,
-    default: null,
     unique: true,
     sparse: true, // allows multiple docs with dmKey: null (non-DM rooms)
   },
