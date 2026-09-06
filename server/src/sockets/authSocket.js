@@ -13,7 +13,7 @@ const parseCookies = (cookieHeader) => {
 const socketAuthMiddleware = (socket, next) => {
   try {
     const rawCookies = socket.handshake.headers.cookie;
-    
+
 
     if (!rawCookies) {
       return next(new Error('Authentication error: no cookie'));
@@ -30,7 +30,7 @@ const socketAuthMiddleware = (socket, next) => {
     socket.userId = decoded.userId;
     next();
   } catch (err) {
-    console.log('❌ jwt.verify failed:', err.message);
+    console.error('Socket auth failed:', err.message); // keep, but drop the emoji/debug tone
     next(new Error('Authentication error: invalid token'));
   }
 };
