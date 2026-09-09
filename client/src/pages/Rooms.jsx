@@ -34,6 +34,7 @@ function Rooms({ connected, user, logout }) {
   };
 
   useEffect(() => {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional fetch-on-mount pattern
     loadRooms();
   }, []);
 

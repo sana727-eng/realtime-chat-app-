@@ -22,6 +22,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   useEffect(() => {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional fetch-on-mount pattern
     fetchMe();
   }, []);
 
@@ -49,4 +50,5 @@ export const AuthProvider = ({ children }) => {
   );
 };
 
+// eslint-disable-next-line react-refresh/only-export-components -- context + hook co-located intentionally
 export const useAuth = () => useContext(AuthContext);
